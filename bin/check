@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -eu -o pipefail
 exec 3>&1 1>&2
 
@@ -21,7 +21,14 @@ fi
 
 jq '.source.filters | to_entries | map({"Name": .key, "Values": [(.value|select(type!="array") = [.])|.[]|tostring]})' /tmp/input > /tmp/filters.json
 
+owners_args=()
+mapfile -t owners <(jq '.source.owners | .[]? | tostring' /tmp/input)
+if [[ ${#owners[@]} -gt 0 ]]; then
+  owner_args=(--owners "${owner[@]}")
+fi
+
 aws ec2 describe-images \
   --filters file:///tmp/filters.json \
+  "${owner_args[@]}" \
   --query 'sort_by(Images, &CreationDate)' \
   | jq '.[([.[] | .ImageId] | index("'$AMI'") // -2) + 1:] | [.[] | {ami: .ImageId}]' >&3
