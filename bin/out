@@ -1,5 +1,60 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# Does not create an AMI, but generates a Concourse resource version to reflect an already-created AMI. Helpful when a version must be used on-demand rather than waiting for a `check`.
 set -eu -o pipefail
 exec 3>&1 1>&2
 
-cat | jq '{version}' <&0 >&3
+src=$1
+
+# input:
+# {
+#   "source": {
+#     "aws_access_key_id": "...",
+#     "aws_secret_access_key": "...",
+#     "filters": "...",
+#     "owners": ...,
+#     "region": "eu-central-1"
+#   },
+#   "params": {
+#     "input": "..."
+#   }
+# }
+
+jq . > /tmp/input
+
+export AWS_ACCESS_KEY_ID=$(jq -r '.source.aws_access_key_id // empty' /tmp/input)
+export AWS_SECRET_ACCESS_KEY=$(jq -r '.source.aws_secret_access_key // empty' /tmp/input)
+export AWS_DEFAULT_REGION=$(jq -r '.source.region // empty' /tmp/input)
+
+input=$(jq -r '.params.input // "image"' /tmp/input)
+image_id=$(jq -r .ImageId "${src}/${input}/json")
+
+echo 'Filters:'
+jq --arg image_id "${image_id}" \
+    '.source.filters
+    | to_entries
+    | map({"Name": .key, "Values": [(.value|select(type!="array") = [.])|.[]|tostring]})
+    | . + [{Name: "image-id", Values: [$image_id]}]
+    ' \
+    /tmp/input \
+  | tee /tmp/filters.json
+
+owners_args=()
+mapfile -t owners <(jq '.source.owners | .[]? | tostring' /tmp/input)
+if [[ ${#owners[@]} -gt 0 ]]; then
+  echo "Owners" "${owner[@]}"
+  owner_args=(--owners "${owner[@]}")
+fi
+
+found_image=$(
+  aws ec2 describe-images \
+      --filters file:///tmp/filters.json \
+      "${owner_args[@]}" \
+      --query 'sort_by(Images, &CreationDate)' \
+    | jq 'length > 0'
+)
+if [[ ${found_image} == false ]]; then
+  echo 'Image ${image_id} not found'
+  exit 1
+fi
+
+jq --arg image_id "${image_id}" -n '{version:{ami:$image_id}}' >&3
