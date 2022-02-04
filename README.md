@@ -40,6 +40,27 @@ Places the following files in the destination:
   {"source_ami": "ami-5731123e"}
   ```
 
+### `out`: Check that an AMI exists
+
+For bookkeeping in Concourse—generates a new version immediately so it can be passed to the next job in a pipeline without needing a `check` to run. Expects a JSON file at `input/json` with an object containing an `ImageId` property e.g.
+
+```json
+{
+  "ImageId": "ami-...",
+  ...
+}
+```
+
+`input` can be overridden with the put params `input` e.g.
+
+```json
+put: my-image
+params:
+  input: other-input
+```
+
+in which case the JSON file is expected at `other-input/json`.
+
 #### Parameters
 
 *None.*
